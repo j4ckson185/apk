@@ -1,11 +1,12 @@
-name: Build Android APK (Ultra Compatible)
+name: Build Android APK (Ubuntu 22.04)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04  # Ubuntu mais antigoo
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
     
     steps:
     - name: Checkout code
@@ -15,6 +16,7 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '16'
+        cache: 'npm'
     
     - name: Setup Java JDK 11
       uses: actions/setup-java@v4
@@ -22,19 +24,28 @@ jobs:
         distribution: 'temurin'
         java-version: '11'
     
-    - name: Setup Android SDK (Legacy)
+    - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       with:
         api-level: 33
         build-tools: 33.0.0
+        ndk: 23.1.7779620
     
-    - name: Force Gradle 7.6 (Ultra Compatible)
+    - name: Cache node_modules
+      uses: actions/cache@v3
+      with:
+        path: node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+    
+    - name: Force Gradle 7.6
       run: |
         cd android
         chmod +x gradlew
-        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.6-all.zip" > gradle/wrapper/gradle-wrapper.properties
+        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.6.4-all.zip" > gradle/wrapper/gradle-wrapper.properties
     
-    - name: Downgrade build settings
+    - name: Update build configuration for compatibility
       run: |
         cd android
         sed -i 's/buildToolsVersion = "35.0.0"/buildToolsVersion = "33.0.0"/g' build.gradle
@@ -42,15 +53,16 @@ jobs:
         sed -i 's/targetSdkVersion = 35/targetSdkVersion = 33/g' build.gradle
         sed -i 's/ndkVersion = "27.1.12297006"/ndkVersion = "23.1.7779620"/g' build.gradle
     
-    - name: Install dependencies
-      run: npm install --legacy-peer-deps --force
-    
-    - name: Remove problematic packages
+    - name: Remove problematic dependencies
       run: |
-        rm -rf node_modules/react-native-vibration
-        rm -rf node_modules/react-native-sound
+        rm -rf node_modules/react-native-vibration || true
+        rm -rf node_modules/react-native-sound || true
+        
+    - name: Install dependencies with legacy support
+      run: |
+        npm install --legacy-peer-deps --force --no-audit
     
-    - name: Create google-services.json
+    - name: Create minimal google-services.json
       run: |
         mkdir -p android/app
         cat > android/app/google-services.json << 'EOF'
@@ -77,16 +89,44 @@ jobs:
         }
         EOF
     
-    - name: Build APK
+    - name: Fix Gradle classpath
       run: |
         cd android
-        ./gradlew clean
-        ./gradlew assembleRelease --stacktrace
+        sed -i 's/classpath("com.android.tools.build:gradle")/classpath("com.android.tools.build:gradle:7.4.2")/g' build.gradle
+        sed -i 's/classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")/classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10")/g' build.gradle
+    
+    - name: Clean project thoroughly
+      run: |
+        cd android
+        ./gradlew clean --no-daemon
+        rm -rf app/build || true
+        rm -rf build || true
+    
+    - name: Build APK with minimal flags
+      run: |
+        cd android
+        ./gradlew assembleRelease \
+          --no-daemon \
+          --stacktrace \
+          --warning-mode all \
+          -Dorg.gradle.jvmargs="-Xmx3072m -XX:MaxMetaspaceSize=512m" \
+          -Pandroid.useAndroidX=true \
+          -Pandroid.enableJetifier=true
       env:
-        GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2"
+        FLIPPER_DISABLE: 1
+        GRADLE_OPTS: "-Dorg.gradle.daemon=false"
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: cabana-delivery-legacy
+        name: cabana-delivery-app
         path: android/app/build/outputs/apk/release/app-release.apk
+    
+    - name: Upload build logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: |
+          android/app/build/outputs/logs/
+          android/build/outputs/logs/
