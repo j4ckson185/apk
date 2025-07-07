@@ -1,4 +1,4 @@
-name: Build Android APK (Ubuntu 22.04)
+name: Build Android APK (Fixed)
 
 on:
   workflow_dispatch:
@@ -18,51 +18,40 @@ jobs:
         node-version: '16'
         cache: 'npm'
     
-    - name: Setup Java JDK 11
+    - name: Setup Java JDK 17 (Required for new Android SDK)
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
-        java-version: '11'
+        java-version: '17'
     
-    - name: Setup Android SDK
+    - name: Setup Android SDK (Corrected parameters)
       uses: android-actions/setup-android@v3
       with:
-        api-level: 33
-        build-tools: 33.0.0
-        ndk: 23.1.7779620
+        packages: 'platforms;android-33 build-tools;33.0.0 ndk;23.1.7779620'
+        accept-android-sdk-licenses: true
     
-    - name: Cache node_modules
-      uses: actions/cache@v3
-      with:
-        path: node_modules
-        key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-node-
-    
-    - name: Force Gradle 7.6
+    - name: Force Gradle 7.6 + downgrade build config
       run: |
         cd android
         chmod +x gradlew
         echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.6.4-all.zip" > gradle/wrapper/gradle-wrapper.properties
-    
-    - name: Update build configuration for compatibility
-      run: |
-        cd android
+        
+        # Downgrade build settings to be compatible
         sed -i 's/buildToolsVersion = "35.0.0"/buildToolsVersion = "33.0.0"/g' build.gradle
         sed -i 's/compileSdkVersion = 35/compileSdkVersion = 33/g' build.gradle
         sed -i 's/targetSdkVersion = 35/targetSdkVersion = 33/g' build.gradle
         sed -i 's/ndkVersion = "27.1.12297006"/ndkVersion = "23.1.7779620"/g' build.gradle
     
-    - name: Remove problematic dependencies
+    - name: Remove problematic dependencies before install
       run: |
         rm -rf node_modules/react-native-vibration || true
         rm -rf node_modules/react-native-sound || true
         
-    - name: Install dependencies with legacy support
+    - name: Install dependencies
       run: |
         npm install --legacy-peer-deps --force --no-audit
     
-    - name: Create minimal google-services.json
+    - name: Create google-services.json
       run: |
         mkdir -p android/app
         cat > android/app/google-services.json << 'EOF'
@@ -89,27 +78,20 @@ jobs:
         }
         EOF
     
-    - name: Fix Gradle classpath
+    - name: Fix Gradle classpath versions
       run: |
         cd android
         sed -i 's/classpath("com.android.tools.build:gradle")/classpath("com.android.tools.build:gradle:7.4.2")/g' build.gradle
         sed -i 's/classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")/classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10")/g' build.gradle
     
-    - name: Clean project thoroughly
+    - name: Clean and build APK
       run: |
         cd android
         ./gradlew clean --no-daemon
-        rm -rf app/build || true
-        rm -rf build || true
-    
-    - name: Build APK with minimal flags
-      run: |
-        cd android
         ./gradlew assembleRelease \
           --no-daemon \
           --stacktrace \
-          --warning-mode all \
-          -Dorg.gradle.jvmargs="-Xmx3072m -XX:MaxMetaspaceSize=512m" \
+          -Dorg.gradle.jvmargs="-Xmx3072m" \
           -Pandroid.useAndroidX=true \
           -Pandroid.enableJetifier=true
       env:
@@ -121,12 +103,3 @@ jobs:
       with:
         name: cabana-delivery-app
         path: android/app/build/outputs/apk/release/app-release.apk
-    
-    - name: Upload build logs on failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs
-        path: |
-          android/app/build/outputs/logs/
-          android/build/outputs/logs/
