@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04  # Ubuntu mais antigo
+    runs-on: ubuntu-20.04  # Ubuntu mais antigoo
     
     steps:
     - name: Checkout code
