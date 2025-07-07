@@ -1,4 +1,4 @@
-name: Build Android APK (Fixed)
+name: Build Android APK (Working Versions)
 
 on:
   workflow_dispatch:
@@ -6,50 +6,74 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Setup Node.js 16
+    - name: Setup Node.js 18
       uses: actions/setup-node@v4
       with:
-        node-version: '16'
+        node-version: '18'
         cache: 'npm'
     
-    - name: Setup Java JDK 17 (Required for new Android SDK)
+    - name: Setup Java JDK 17
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
         java-version: '17'
     
-    - name: Setup Android SDK (Corrected parameters)
+    - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       with:
-        packages: 'platforms;android-33 build-tools;33.0.0 ndk;23.1.7779620'
+        packages: 'platforms;android-34 build-tools;34.0.0 ndk;25.1.8937393'
         accept-android-sdk-licenses: true
     
-    - name: Force Gradle 7.6 + downgrade build config
+    - name: Force compatible Gradle version
       run: |
         cd android
         chmod +x gradlew
-        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.6.4-all.zip" > gradle/wrapper/gradle-wrapper.properties
-        
-        # Downgrade build settings to be compatible
-        sed -i 's/buildToolsVersion = "35.0.0"/buildToolsVersion = "33.0.0"/g' build.gradle
-        sed -i 's/compileSdkVersion = 35/compileSdkVersion = 33/g' build.gradle
-        sed -i 's/targetSdkVersion = 35/targetSdkVersion = 33/g' build.gradle
-        sed -i 's/ndkVersion = "27.1.12297006"/ndkVersion = "23.1.7779620"/g' build.gradle
+        # Gradle 8.3 é compatível com React Native 0.80.1
+        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.3-all.zip" > gradle/wrapper/gradle-wrapper.properties
     
-    - name: Remove problematic dependencies before install
+    - name: Update build.gradle for compatibility
+      run: |
+        cd android
+        # Usar versões compatíveis
+        cat > build.gradle << 'EOF'
+        buildscript {
+            ext {
+                buildToolsVersion = "34.0.0"
+                minSdkVersion = 24
+                compileSdkVersion = 34
+                targetSdkVersion = 34
+                ndkVersion = "25.1.8937393"
+                kotlinVersion = "1.8.10"
+            }
+            repositories {
+                google()
+                mavenCentral()
+            }
+            dependencies {
+                classpath("com.android.tools.build:gradle:8.1.4")
+                classpath("com.facebook.react:react-native-gradle-plugin")
+                classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10")
+                classpath 'com.google.gms:google-services:4.4.0'
+            }
+        }
+        
+        apply plugin: "com.facebook.react.rootproject"
+        EOF
+    
+    - name: Install dependencies
+      run: |
+        npm ci --legacy-peer-deps
+    
+    - name: Remove problematic dependencies
       run: |
         rm -rf node_modules/react-native-vibration || true
         rm -rf node_modules/react-native-sound || true
-        
-    - name: Install dependencies
-      run: |
-        npm install --legacy-peer-deps --force --no-audit
     
     - name: Create google-services.json
       run: |
@@ -78,22 +102,11 @@ jobs:
         }
         EOF
     
-    - name: Fix Gradle classpath versions
-      run: |
-        cd android
-        sed -i 's/classpath("com.android.tools.build:gradle")/classpath("com.android.tools.build:gradle:7.4.2")/g' build.gradle
-        sed -i 's/classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")/classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10")/g' build.gradle
-    
     - name: Clean and build APK
       run: |
         cd android
-        ./gradlew clean --no-daemon
-        ./gradlew assembleRelease \
-          --no-daemon \
-          --stacktrace \
-          -Dorg.gradle.jvmargs="-Xmx3072m" \
-          -Pandroid.useAndroidX=true \
-          -Pandroid.enableJetifier=true
+        ./gradlew clean
+        ./gradlew assembleRelease --stacktrace --no-daemon
       env:
         FLIPPER_DISABLE: 1
         GRADLE_OPTS: "-Dorg.gradle.daemon=false"
@@ -101,5 +114,14 @@ jobs:
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: cabana-delivery-app
+        name: cabana-delivery-working
         path: android/app/build/outputs/apk/release/app-release.apk
+    
+    - name: Upload logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-error-logs
+        path: |
+          android/app/build/outputs/logs/
+          ~/.gradle/daemon/*/daemon-*.out.log
