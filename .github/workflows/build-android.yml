@@ -1,4 +1,4 @@
-name: Build Android APK (Working Versions)
+name: Build Android APK (Ultra Safe)
 
 on:
   workflow_dispatch:
@@ -6,122 +6,95 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Setup Node.js 18
+    - name: Setup Node.js 16
       uses: actions/setup-node@v4
       with:
-        node-version: '18'
-        cache: 'npm'
+        node-version: '16'
     
-    - name: Setup Java JDK 17
+    - name: Setup Java JDK 11
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
-        java-version: '17'
+        java-version: '11'
     
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-      with:
-        packages: 'platforms;android-34 build-tools;34.0.0 ndk;25.1.8937393'
-        accept-android-sdk-licenses: true
+    - name: Setup Android SDK (Manual - Ultra Safe)
+      run: |
+        export SKIP_JDK_VERSION_CHECK=true
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-6858069_latest.zip
+        unzip -q commandlinetools-linux-6858069_latest.zip
+        mkdir -p $HOME/android-sdk/cmdline-tools/latest
+        mv cmdline-tools/* $HOME/android-sdk/cmdline-tools/latest/
+        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "SKIP_JDK_VERSION_CHECK=true" >> $GITHUB_ENV
+        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        echo "y" | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-33" "build-tools;33.0.0"
     
-    - name: Force compatible Gradle version
+    - name: Completely rewrite android build files
       run: |
         cd android
         chmod +x gradlew
-        # Gradle 8.3 é compatível com React Native 0.80.1
-        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.3-all.zip" > gradle/wrapper/gradle-wrapper.properties
-    
-    - name: Update build.gradle for compatibility
-      run: |
-        cd android
-        # Usar versões compatíveis
+        
+        # Force Gradle 7.4.2 (ultra safe)
+        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.4.2-all.zip" > gradle/wrapper/gradle-wrapper.properties
+        
+        # Rewrite root build.gradle
         cat > build.gradle << 'EOF'
         buildscript {
             ext {
-                buildToolsVersion = "34.0.0"
-                minSdkVersion = 24
-                compileSdkVersion = 34
-                targetSdkVersion = 34
-                ndkVersion = "25.1.8937393"
-                kotlinVersion = "1.8.10"
+                buildToolsVersion = "33.0.0"
+                minSdkVersion = 21
+                compileSdkVersion = 33
+                targetSdkVersion = 33
+                ndkVersion = "21.4.7075529"
             }
             repositories {
                 google()
                 mavenCentral()
             }
             dependencies {
-                classpath("com.android.tools.build:gradle:8.1.4")
+                classpath("com.android.tools.build:gradle:7.2.1")
                 classpath("com.facebook.react:react-native-gradle-plugin")
-                classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10")
-                classpath 'com.google.gms:google-services:4.4.0'
+                classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+                classpath 'com.google.gms:google-services:4.3.13'
             }
         }
-        
-        apply plugin: "com.facebook.react.rootproject"
+
+        allprojects {
+            repositories {
+                google()
+                mavenCentral()
+                maven { url "https://www.jitpack.io" }
+            }
+        }
         EOF
     
-    - name: Install dependencies
+    - name: Install and fix dependencies
       run: |
-        npm ci --legacy-peer-deps
-    
-    - name: Remove problematic dependencies
-      run: |
-        rm -rf node_modules/react-native-vibration || true
-        rm -rf node_modules/react-native-sound || true
+        npm install --legacy-peer-deps --force
+        rm -rf node_modules/react-native-vibration
+        rm -rf node_modules/react-native-sound
     
     - name: Create google-services.json
       run: |
         mkdir -p android/app
-        cat > android/app/google-services.json << 'EOF'
-        {
-          "project_info": {
-            "project_number": "905864103175",
-            "project_id": "apiifood-e0d35"
-          },
-          "client": [
-            {
-              "client_info": {
-                "mobilesdk_app_id": "1:905864103175:android:dummy",
-                "android_client_info": {
-                  "package_name": "com.cabanadelivery"
-                }
-              },
-              "api_key": [
-                {
-                  "current_key": "AIzaSyBuRHTtuKgpQE_qAdMIbT9_9qbjh4cbLI8"
-                }
-              ]
-            }
-          ]
-        }
-        EOF
+        echo '{"project_info":{"project_number":"905864103175","project_id":"apiifood-e0d35"},"client":[{"client_info":{"mobilesdk_app_id":"1:905864103175:android:dummy","android_client_info":{"package_name":"com.cabanadelivery"}},"api_key":[{"current_key":"AIzaSyBuRHTtuKgpQE_qAdMIbT9_9qbjh4cbLI8"}]}]}' > android/app/google-services.json
     
-    - name: Clean and build APK
+    - name: Build APK
       run: |
         cd android
-        ./gradlew clean
-        ./gradlew assembleRelease --stacktrace --no-daemon
+        ./gradlew clean assembleRelease --no-daemon --stacktrace
       env:
-        FLIPPER_DISABLE: 1
+        SKIP_JDK_VERSION_CHECK: true
         GRADLE_OPTS: "-Dorg.gradle.daemon=false"
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: cabana-delivery-working
+        name: cabana-delivery-ultra-safe
         path: android/app/build/outputs/apk/release/app-release.apk
-    
-    - name: Upload logs on failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-error-logs
-        path: |
-          android/app/build/outputs/logs/
-          ~/.gradle/daemon/*/daemon-*.out.log
