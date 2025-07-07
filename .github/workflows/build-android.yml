@@ -1,56 +1,54 @@
-name: Build Android APK
+name: Build Android APK (Ultra Compatible)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04  # Ubuntu mais antigo
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Setup Node.js 18
+    - name: Setup Node.js 16
       uses: actions/setup-node@v4
       with:
-        node-version: '18'
-        cache: 'npm'
+        node-version: '16'
     
-    - name: Setup Java JDK 17
+    - name: Setup Java JDK 11
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
-        java-version: '17'
+        java-version: '11'
     
-    - name: Setup Android SDK (Conservative)
+    - name: Setup Android SDK (Legacy)
       uses: android-actions/setup-android@v3
       with:
-        api-level: 34
-        build-tools: 34.0.0
+        api-level: 33
+        build-tools: 33.0.0
     
-    - name: Force Gradle 8.6 (Compatible)
+    - name: Force Gradle 7.6 (Ultra Compatible)
       run: |
         cd android
         chmod +x gradlew
-        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-all.zip" > gradle/wrapper/gradle-wrapper.properties
+        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.6-all.zip" > gradle/wrapper/gradle-wrapper.properties
     
-    - name: Update Android Gradle Plugin (Compatible)
+    - name: Downgrade build settings
       run: |
         cd android
-        sed -i 's/buildToolsVersion = "35.0.0"/buildToolsVersion = "34.0.0"/g' build.gradle
-        sed -i 's/compileSdkVersion = 35/compileSdkVersion = 34/g' build.gradle
-        sed -i 's/targetSdkVersion = 35/targetSdkVersion = 34/g' build.gradle
+        sed -i 's/buildToolsVersion = "35.0.0"/buildToolsVersion = "33.0.0"/g' build.gradle
+        sed -i 's/compileSdkVersion = 35/compileSdkVersion = 33/g' build.gradle
+        sed -i 's/targetSdkVersion = 35/targetSdkVersion = 33/g' build.gradle
+        sed -i 's/ndkVersion = "27.1.12297006"/ndkVersion = "23.1.7779620"/g' build.gradle
     
     - name: Install dependencies
-      run: |
-        npm ci --legacy-peer-deps
+      run: npm install --legacy-peer-deps --force
     
-    - name: Remove problematic dependencies
+    - name: Remove problematic packages
       run: |
-        rm -rf node_modules/react-native-vibration || true
+        rm -rf node_modules/react-native-vibration
+        rm -rf node_modules/react-native-sound
     
     - name: Create google-services.json
       run: |
@@ -79,26 +77,16 @@ jobs:
         }
         EOF
     
-    - name: Clean project
+    - name: Build APK
       run: |
         cd android
-        ./gradlew clean --warning-mode all
-    
-    - name: Build APK with compatibility flags
-      run: |
-        cd android
-        ./gradlew assembleRelease \
-          --warning-mode all \
-          --stacktrace \
-          -Dorg.gradle.jvmargs="-Xmx4096m" \
-          -Pandroid.useAndroidX=true \
-          -Pandroid.enableJetifier=true
+        ./gradlew clean
+        ./gradlew assembleRelease --stacktrace
       env:
-        FLIPPER_DISABLE: 1
-        GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+        GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2"
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: cabana-delivery-app
+        name: cabana-delivery-legacy
         path: android/app/build/outputs/apk/release/app-release.apk
