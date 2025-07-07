@@ -1,100 +1,74 @@
-name: Build Android APK (Ultra Safe)
+name: Build Android APK (No Modifications)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04  # Volta para versão mais antiga e estável
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Setup Node.js 16
+    - name: Setup Node.js 18 (Exact version from package.json)
       uses: actions/setup-node@v4
       with:
-        node-version: '16'
+        node-version: '18'
+        cache: 'npm'
     
-    - name: Setup Java JDK 11
+    - name: Setup Java JDK 17
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
-        java-version: '11'
+        java-version: '17'
     
-    - name: Setup Android SDK (Manual - Ultra Safe)
+    - name: Accept ALL Android licenses
       run: |
-        export SKIP_JDK_VERSION_CHECK=true
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-6858069_latest.zip
-        unzip -q commandlinetools-linux-6858069_latest.zip
-        mkdir -p $HOME/android-sdk/cmdline-tools/latest
-        mv cmdline-tools/* $HOME/android-sdk/cmdline-tools/latest/
-        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "SKIP_JDK_VERSION_CHECK=true" >> $GITHUB_ENV
-        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        echo "y" | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-33" "build-tools;33.0.0"
+        echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+        echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --update || true
     
-    - name: Completely rewrite android build files
+    - name: Install EXACT dependencies (no modifications)
       run: |
-        cd android
-        chmod +x gradlew
-        
-        # Force Gradle 7.4.2 (ultra safe)
-        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.4.2-all.zip" > gradle/wrapper/gradle-wrapper.properties
-        
-        # Rewrite root build.gradle
-        cat > build.gradle << 'EOF'
-        buildscript {
-            ext {
-                buildToolsVersion = "33.0.0"
-                minSdkVersion = 21
-                compileSdkVersion = 33
-                targetSdkVersion = 33
-                ndkVersion = "21.4.7075529"
+        npm ci
+    
+    - name: Create minimal google-services.json only
+      run: |
+        mkdir -p android/app
+        cat > android/app/google-services.json << 'EOF'
+        {
+          "project_info": {
+            "project_number": "905864103175",
+            "project_id": "apiifood-e0d35"
+          },
+          "client": [
+            {
+              "client_info": {
+                "mobilesdk_app_id": "1:905864103175:android:dummy",
+                "android_client_info": {
+                  "package_name": "com.cabanadelivery"
+                }
+              },
+              "api_key": [
+                {
+                  "current_key": "AIzaSyBuRHTtuKgpQE_qAdMIbT9_9qbjh4cbLI8"
+                }
+              ]
             }
-            repositories {
-                google()
-                mavenCentral()
-            }
-            dependencies {
-                classpath("com.android.tools.build:gradle:7.2.1")
-                classpath("com.facebook.react:react-native-gradle-plugin")
-                classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
-                classpath 'com.google.gms:google-services:4.3.13'
-            }
-        }
-
-        allprojects {
-            repositories {
-                google()
-                mavenCentral()
-                maven { url "https://www.jitpack.io" }
-            }
+          ]
         }
         EOF
     
-    - name: Install and fix dependencies
-      run: |
-        npm install --legacy-peer-deps --force
-        rm -rf node_modules/react-native-vibration
-        rm -rf node_modules/react-native-sound
-    
-    - name: Create google-services.json
-      run: |
-        mkdir -p android/app
-        echo '{"project_info":{"project_number":"905864103175","project_id":"apiifood-e0d35"},"client":[{"client_info":{"mobilesdk_app_id":"1:905864103175:android:dummy","android_client_info":{"package_name":"com.cabanadelivery"}},"api_key":[{"current_key":"AIzaSyBuRHTtuKgpQE_qAdMIbT9_9qbjh4cbLI8"}]}]}' > android/app/google-services.json
-    
-    - name: Build APK
+    - name: Build APK (no modifications to gradle files)
       run: |
         cd android
+        chmod +x gradlew
         ./gradlew clean assembleRelease --no-daemon --stacktrace
       env:
-        SKIP_JDK_VERSION_CHECK: true
-        GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+        FLIPPER_DISABLE: 1
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: cabana-delivery-ultra-safe
+        name: cabana-delivery-simple
         path: android/app/build/outputs/apk/release/app-release.apk
