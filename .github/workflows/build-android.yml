@@ -13,10 +13,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Setup Node.js
+    - name: Setup Node.js 18
       uses: actions/setup-node@v4
       with:
         node-version: '18'
+        cache: 'npm'
     
     - name: Setup Java JDK 17
       uses: actions/setup-java@v4
@@ -27,44 +28,81 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       with:
-        api-level: 33
-        build-tools: 33.0.0
+        api-level: 35
+        build-tools: 35.0.0
+        cmake: 3.22.1
+        ndk: 27.1.12297006
     
-    - name: Clean install dependencies
+    - name: Cache Gradle
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+    
+    - name: Install dependencies
       run: |
-        rm -rf node_modules
-        rm -f package-lock.json
-        npm install
-    
-    - name: Install React Native CLI
-      run: npm install -g @react-native-community/cli
-    
-    - name: Fix Android dependencies
-      run: |
-        cd android
-        chmod +x gradlew
-        ./gradlew clean
+        npm ci --legacy-peer-deps
         
-    - name: Jetify dependencies
-      run: npx jetify || true
+    - name: Fix react-native-vibration (problematic dependency)
+      run: |
+        rm -rf node_modules/react-native-vibration
+        npm install react-native-haptic-feedback --save
+        
+    - name: Create google-services.json (dummy)
+      run: |
+        mkdir -p android/app
+        cat > android/app/google-services.json << 'EOF'
+        {
+          "project_info": {
+            "project_number": "905864103175",
+            "project_id": "apiifood-e0d35"
+          },
+          "client": [
+            {
+              "client_info": {
+                "mobilesdk_app_id": "1:905864103175:android:dummy",
+                "android_client_info": {
+                  "package_name": "com.cabanadelivery"
+                }
+              },
+              "api_key": [
+                {
+                  "current_key": "AIzaSyBuRHTtuKgpQE_qAdMIbT9_9qbjh4cbLI8"
+                }
+              ]
+            }
+          ]
+        }
+        EOF
     
-    - name: Build APK with verbose output
+    - name: Make gradlew executable
+      run: chmod +x android/gradlew
+    
+    - name: Clean project
       run: |
         cd android
-        ./gradlew assembleRelease --stacktrace --debug
+        ./gradlew clean
+    
+    - name: Build APK
+      run: |
+        cd android
+        ./gradlew assembleRelease --stacktrace
       env:
-        ANDROID_HOME: /usr/local/lib/android/sdk
-        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        FLIPPER_DISABLE: 1
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: cabana-delivery-apk
+        name: cabana-delivery-app
         path: android/app/build/outputs/apk/release/app-release.apk
     
-    - name: Upload build logs on failure
-      if: failure()
+    - name: Upload mapping (for debugging)
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs
-        path: android/app/build/outputs/logs/
+        name: build-mapping
+        path: android/app/build/outputs/mapping/release/
