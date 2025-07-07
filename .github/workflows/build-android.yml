@@ -25,34 +25,34 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
     
-    - name: Setup Android SDK
+    - name: Setup Android SDK (Conservative)
       uses: android-actions/setup-android@v3
       with:
-        api-level: 35
-        build-tools: 35.0.0
-        cmake: 3.22.1
-        ndk: 27.1.12297006
+        api-level: 34
+        build-tools: 34.0.0
     
-    - name: Cache Gradle
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
+    - name: Force Gradle 8.6 (Compatible)
+      run: |
+        cd android
+        chmod +x gradlew
+        echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-all.zip" > gradle/wrapper/gradle-wrapper.properties
+    
+    - name: Update Android Gradle Plugin (Compatible)
+      run: |
+        cd android
+        sed -i 's/buildToolsVersion = "35.0.0"/buildToolsVersion = "34.0.0"/g' build.gradle
+        sed -i 's/compileSdkVersion = 35/compileSdkVersion = 34/g' build.gradle
+        sed -i 's/targetSdkVersion = 35/targetSdkVersion = 34/g' build.gradle
     
     - name: Install dependencies
       run: |
         npm ci --legacy-peer-deps
-        
-    - name: Fix react-native-vibration (problematic dependency)
+    
+    - name: Remove problematic dependencies
       run: |
-        rm -rf node_modules/react-native-vibration
-        npm install react-native-haptic-feedback --save
-        
-    - name: Create google-services.json (dummy)
+        rm -rf node_modules/react-native-vibration || true
+    
+    - name: Create google-services.json
       run: |
         mkdir -p android/app
         cat > android/app/google-services.json << 'EOF'
@@ -79,30 +79,26 @@ jobs:
         }
         EOF
     
-    - name: Make gradlew executable
-      run: chmod +x android/gradlew
-    
     - name: Clean project
       run: |
         cd android
-        ./gradlew clean
+        ./gradlew clean --warning-mode all
     
-    - name: Build APK
+    - name: Build APK with compatibility flags
       run: |
         cd android
-        ./gradlew assembleRelease --stacktrace
+        ./gradlew assembleRelease \
+          --warning-mode all \
+          --stacktrace \
+          -Dorg.gradle.jvmargs="-Xmx4096m" \
+          -Pandroid.useAndroidX=true \
+          -Pandroid.enableJetifier=true
       env:
         FLIPPER_DISABLE: 1
+        GRADLE_OPTS: "-Dorg.gradle.daemon=false"
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: cabana-delivery-app
         path: android/app/build/outputs/apk/release/app-release.apk
-    
-    - name: Upload mapping (for debugging)
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-mapping
-        path: android/app/build/outputs/mapping/release/
