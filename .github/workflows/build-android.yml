@@ -1,74 +1,71 @@
-name: Build Android APK (No Modifications)
+name: Build with EAS (Expo Alternative)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04  # Volta para versão mais antiga e estável
+    runs-on: ubuntu-22.04
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Setup Node.js 18 (Exact version from package.json)
+    - name: Setup Node.js 18
       uses: actions/setup-node@v4
       with:
         node-version: '18'
-        cache: 'npm'
     
-    - name: Setup Java JDK 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '17'
+    - name: Install EAS CLI
+      run: npm install -g @expo/cli eas-cli
     
-    - name: Accept ALL Android licenses
+    - name: Install dependencies
+      run: npm install --legacy-peer-deps
+    
+    - name: Create minimal app.json for EAS
       run: |
-        echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-        echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --update || true
-    
-    - name: Install EXACT dependencies (no modifications)
-      run: |
-        npm ci
-    
-    - name: Create minimal google-services.json only
-      run: |
-        mkdir -p android/app
-        cat > android/app/google-services.json << 'EOF'
+        cat > app.json << 'EOF'
         {
-          "project_info": {
-            "project_number": "905864103175",
-            "project_id": "apiifood-e0d35"
-          },
-          "client": [
-            {
-              "client_info": {
-                "mobilesdk_app_id": "1:905864103175:android:dummy",
-                "android_client_info": {
-                  "package_name": "com.cabanadelivery"
-                }
-              },
-              "api_key": [
-                {
-                  "current_key": "AIzaSyBuRHTtuKgpQE_qAdMIbT9_9qbjh4cbLI8"
-                }
-              ]
+          "expo": {
+            "name": "Cabana Delivery",
+            "slug": "cabana-delivery",
+            "version": "1.0.0",
+            "platforms": ["android"],
+            "android": {
+              "package": "com.cabanadelivery",
+              "versionCode": 1
             }
-          ]
+          }
         }
         EOF
     
-    - name: Build APK (no modifications to gradle files)
+    - name: Create eas.json
       run: |
-        cd android
-        chmod +x gradlew
-        ./gradlew clean assembleRelease --no-daemon --stacktrace
+        cat > eas.json << 'EOF'
+        {
+          "build": {
+            "preview": {
+              "android": {
+                "buildType": "apk"
+              }
+            }
+          }
+        }
+        EOF
+    
+    - name: Build with EAS
+      run: eas build --platform android --profile preview --local --non-interactive
       env:
-        FLIPPER_DISABLE: 1
+        EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    
+    - name: Find and upload APK
+      run: |
+        find . -name "*.apk" -type f
+        mkdir -p outputs
+        find . -name "*.apk" -type f -exec cp {} outputs/ \;
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: cabana-delivery-simple
-        path: android/app/build/outputs/apk/release/app-release.apk
+        name: cabana-delivery-eas
+        path: outputs/*.apk
